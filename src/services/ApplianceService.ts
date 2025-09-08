@@ -24,11 +24,11 @@ export class ApplianceService {
     }
   }
 
-  async getAllAppliances(options: { search?: string; filter?: string } = {}) {
-    const { search, filter } = options;
+  async getAllAppliances(options: { search?: string; filter?: string; userId?: string } = {}) {
+    const { search, filter, userId } = options;
     
     try {
-      // Get all appliances
+      // Get appliances for specific user
       let query = supabase
         .from('appliances')
         .select(`
@@ -38,6 +38,11 @@ export class ApplianceService {
           linked_documents(*)
         `)
         .order('created_at', { ascending: false });
+
+      // Filter by user ID
+      if (userId) {
+        query = query.eq('user_id', userId);
+      }
 
       // Apply search filter
       if (search) {
@@ -107,52 +112,62 @@ export class ApplianceService {
     }
   }
 
-  async getApplianceById(id: string): Promise<Appliance | null> {
-    const results = await db
-      .select({
-        appliance: appliances,
-        supportContacts: supportContacts,
-        maintenanceTasks: maintenanceTasks,
-        linkedDocuments: linkedDocuments,
-      })
-      .from(appliances)
-      .leftJoin(supportContacts, eq(appliances.id, supportContacts.applianceId))
-      .leftJoin(maintenanceTasks, eq(appliances.id, maintenanceTasks.applianceId))
-      .leftJoin(linkedDocuments, eq(appliances.id, linkedDocuments.applianceId))
-      .where(eq(appliances.id, id));
+  async getApplianceById(id: string, userId?: string): Promise<Appliance | null> {
+    try {
+      let query = supabase
+        .from('appliances')
+        .select(`
+          *,
+          support_contacts(*),
+          maintenance_tasks(*),
+          linked_documents(*)
+        `)
+        .eq('id', id);
 
-    if (results.length === 0) {
+      // Filter by user ID if provided
+      if (userId) {
+        query = query.eq('user_id', userId);
+      }
+
+      const { data: appliances, error } = await query;
+
+      if (error) {
+        console.error('Error fetching appliance:', error);
+        return null;
+      }
+
+      if (!appliances || appliances.length === 0) {
+        return null;
+      }
+
+      const appliance = appliances[0];
+      
+      // Calculate maintenance status for each task
+      const maintenanceTasksWithStatus = appliance.maintenance_tasks?.map(task => ({
+        ...task,
+        status: this.calculateMaintenanceStatus(task.scheduled_date, task.completed_date),
+      })) || [];
+
+      return {
+        ...appliance,
+        supportContacts: appliance.support_contacts || [],
+        maintenanceTasks: maintenanceTasksWithStatus,
+        linkedDocuments: appliance.linked_documents || [],
+      };
+    } catch (error) {
+      console.error('Error fetching appliance:', error);
       return null;
     }
-
-    const appliance = results[0].appliance;
-    const supportContactsList = results
-      .filter(r => r.supportContacts)
-      .map(r => r.supportContacts!);
-    
-    const maintenanceTasksList = results
-      .filter(r => r.maintenanceTasks)
-      .map(r => ({
-        ...r.maintenanceTasks!,
-        status: this.calculateMaintenanceStatus(r.maintenanceTasks!.scheduledDate, r.maintenanceTasks!.completedDate),
-      }));
-    
-    const linkedDocumentsList = results
-      .filter(r => r.linkedDocuments)
-      .map(r => r.linkedDocuments!);
-
-    return {
-      ...appliance,
-      supportContacts: supportContactsList,
-      maintenanceTasks: maintenanceTasksList,
-      linkedDocuments: linkedDocumentsList,
-    };
   }
 
   async createAppliance(data: CreateApplianceData): Promise<Appliance> {
     try {
-      // Get the default user ID if no userId is provided
+      // Use provided userId or get default user ID
       const userId = data.userId || await this.getDefaultUserId();
+      
+      if (!userId) {
+        throw new Error('User ID is required to create an appliance');
+      }
       
       const { data: appliance, error } = await supabase
         .from('appliances')
@@ -197,33 +212,63 @@ export class ApplianceService {
     }
   }
 
-  async updateAppliance(id: string, data: UpdateApplianceData): Promise<Appliance | null> {
-    const [updatedAppliance] = await db
-      .update(appliances)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
-      .where(eq(appliances.id, id))
-      .returning();
+  async updateAppliance(id: string, data: UpdateApplianceData, userId?: string): Promise<Appliance | null> {
+    try {
+      let query = supabase
+        .from('appliances')
+        .update({
+          ...data,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id);
 
-    if (!updatedAppliance) {
+      // Filter by user ID if provided
+      if (userId) {
+        query = query.eq('user_id', userId);
+      }
+
+      const { error } = await query;
+
+      if (error) {
+        console.error('Error updating appliance:', error);
+        return null;
+      }
+
+      return this.getApplianceById(id, userId);
+    } catch (error) {
+      console.error('Error in updateAppliance:', error);
       return null;
     }
-
-    return this.getApplianceById(id);
   }
 
-  async deleteAppliance(id: string): Promise<boolean> {
-    const result = await db
-      .delete(appliances)
-      .where(eq(appliances.id, id));
+  async deleteAppliance(id: string, userId?: string): Promise<boolean> {
+    try {
+      let query = supabase
+        .from('appliances')
+        .delete()
+        .eq('id', id);
 
-    return result.rowCount > 0;
+      // Filter by user ID if provided
+      if (userId) {
+        query = query.eq('user_id', userId);
+      }
+
+      const { error } = await query;
+
+      if (error) {
+        console.error('Error deleting appliance:', error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error in deleteAppliance:', error);
+      return false;
+    }
   }
 
-  async getStats() {
-    const allAppliances = await this.getAllAppliances();
+  async getStats(userId?: string) {
+    const allAppliances = await this.getAllAppliances({ userId });
     
     const stats = {
       total: allAppliances.length,

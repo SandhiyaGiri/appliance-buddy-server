@@ -1,15 +1,17 @@
 import { Request, Response } from 'express';
 import { ApplianceService } from '../services/ApplianceService.js';
+import { AuthenticatedRequest } from '../middleware/auth.js';
 
 export class ApplianceController {
   private applianceService = new ApplianceService();
 
-  async getAllAppliances(req: Request, res: Response) {
+  async getAllAppliances(req: AuthenticatedRequest, res: Response) {
     try {
       const { search, filter } = req.query;
       const appliances = await this.applianceService.getAllAppliances({
         search: search as string,
         filter: filter as string,
+        userId: req.user?.id
       });
       res.json(appliances);
     } catch (error) {
@@ -18,10 +20,10 @@ export class ApplianceController {
     }
   }
 
-  async getApplianceById(req: Request, res: Response) {
+  async getApplianceById(req: AuthenticatedRequest, res: Response) {
     try {
       const { id } = req.params;
-      const appliance = await this.applianceService.getApplianceById(id);
+      const appliance = await this.applianceService.getApplianceById(id, req.user?.id);
       
       if (!appliance) {
         return res.status(404).json({ error: 'Appliance not found' });
@@ -34,9 +36,9 @@ export class ApplianceController {
     }
   }
 
-  async createAppliance(req: Request, res: Response) {
+  async createAppliance(req: AuthenticatedRequest, res: Response) {
     try {
-      const applianceData = req.body;
+      const applianceData = { ...req.body, userId: req.user?.id };
       const appliance = await this.applianceService.createAppliance(applianceData);
       res.status(201).json(appliance);
     } catch (error) {
@@ -45,11 +47,11 @@ export class ApplianceController {
     }
   }
 
-  async updateAppliance(req: Request, res: Response) {
+  async updateAppliance(req: AuthenticatedRequest, res: Response) {
     try {
       const { id } = req.params;
       const updates = req.body;
-      const appliance = await this.applianceService.updateAppliance(id, updates);
+      const appliance = await this.applianceService.updateAppliance(id, updates, req.user?.id);
       
       if (!appliance) {
         return res.status(404).json({ error: 'Appliance not found' });
@@ -62,10 +64,10 @@ export class ApplianceController {
     }
   }
 
-  async deleteAppliance(req: Request, res: Response) {
+  async deleteAppliance(req: AuthenticatedRequest, res: Response) {
     try {
       const { id } = req.params;
-      const success = await this.applianceService.deleteAppliance(id);
+      const success = await this.applianceService.deleteAppliance(id, req.user?.id);
       
       if (!success) {
         return res.status(404).json({ error: 'Appliance not found' });
@@ -78,9 +80,9 @@ export class ApplianceController {
     }
   }
 
-  async getStats(req: Request, res: Response) {
+  async getStats(req: AuthenticatedRequest, res: Response) {
     try {
-      const stats = await this.applianceService.getStats();
+      const stats = await this.applianceService.getStats(req.user?.id);
       res.json(stats);
     } catch (error) {
       console.error('Error fetching stats:', error);
