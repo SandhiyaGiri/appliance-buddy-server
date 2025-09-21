@@ -41,7 +41,18 @@ router.post('/signup', async (req: Request, res: Response) => {
 
       if (dbError) {
         console.error('Error creating user record:', dbError);
-        // Don't fail the request if user record creation fails
+        
+        // Handle specific database errors
+        if (dbError.code === '23505') {
+          return res.status(400).json({ 
+            error: 'Email already exists. Please use a different email or try signing in.' 
+          });
+        }
+        
+        // For other database errors, return a generic message
+        return res.status(400).json({ 
+          error: 'Failed to create user account. Please try again.' 
+        });
       }
     }
 
@@ -75,7 +86,16 @@ router.post('/signin', async (req: Request, res: Response) => {
     });
 
     if (error) {
-      return res.status(401).json({ error: error.message });
+      // Handle specific authentication errors
+      let errorMessage = error.message;
+      
+      if (error.message.includes('Invalid login credentials')) {
+        errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+      } else if (error.message.includes('Email not confirmed')) {
+        errorMessage = 'Please check your email and click the confirmation link before signing in.';
+      }
+      
+      return res.status(401).json({ error: errorMessage });
     }
 
     res.json({
